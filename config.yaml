@@ -1,0 +1,82 @@
+# ==============================================================================
+# Flugpreis-Bot: Konfigurationsdatei (config.yaml)
+# ==============================================================================
+# Hier kannst du alle Suchparameter, Flughäfen und Preisgrenzen bequem anpassen.
+# Nach einer Änderung committest du diese Datei einfach in dein GitHub-Repository.
+
+# 1. ABFLUGHÄFEN (In der Nähe von Meschede / Sauerland)
+# Du kannst Flughäfen hinzufügen oder auskommentieren (# davor setzen).
+origins:
+  # Priorität 1: Sehr nah an Meschede (ca. 45-60 Min Fahrt)
+  - code: "DTM"
+    name: "Dortmund"
+    prio: 1
+  - code: "PAD"
+    name: "Paderborn/Lippstadt"
+    prio: 1
+
+  # Priorität 2: Gut erreichbar per Bahn / Auto (ca. 1,5 - 2 Std.)
+  - code: "DUS"
+    name: "Düsseldorf"
+    prio: 2
+  - code: "CGN"
+    name: "Köln/Bonn"
+    prio: 2
+  - code: "FMO"
+    name: "Münster/Osnabrück"
+    prio: 2
+
+  # Priorität 3: Größere Drehkreuze / Alternativen (ca. 2 - 2,5 Std.)
+  - code: "FRA"
+    name: "Frankfurt am Main"
+    prio: 3
+  - code: "HAJ"
+    name: "Hannover"
+    prio: 3
+  - code: "NRN"
+    name: "Weeze (Niederrhein)"
+    prio: 3
+
+# 2. ZIELFLUGHÄFEN (Georgien)
+destinations:
+  - code: "KUT"
+    name: "Kutaisi"        # Wichtigster Low-Cost-Flughafen (Wizz Air Hub)
+  - code: "TBS"
+    name: "Tiflis / Tbilisi" # Hauptstadt
+  - code: "BUS"
+    name: "Batumi"         # Schwarzmeerküste
+
+# 3. REISEZEITRAUM
+# Format: YYYY-MM (Jahr-Monat)
+months:
+  - "2027-02"  # Februar 2027
+  - "2027-03"  # März 2027
+
+# Aufenthaltsdauer (Tage zwischen Hin- und Rückflug)
+stay_duration:
+  min_days: 7
+  max_days: 14
+
+# 4. DEAL-KRITERIEN (Wann gilt ein Flug als "außergewöhnlich günstig"?)
+deals:
+  # Absolute Preisgrenze in Euro für Hin- UND Rückflug zusammen (pro Person)
+  max_price_eur: 120
+
+  # Relative Preisgrenze: Wie viel Prozent MUSS der Preis unter dem bisherigen
+  # Durchschnitt bzw. Median dieser Route liegen? (z. B. 30 für 30 % Rabatt)
+  relative_discount_percent: 30
+
+  # Mindestanzahl an gespeicherten Preisen, bevor der relative Rabatt aktiv wird
+  min_history_samples: 3
+
+  # Um wie viel Euro muss der Preis mindestens sinken, damit ein BEREITS gemeldeter
+  # Flug noch einmal als "Preis gefallen" verschickt wird?
+  price_drop_threshold_eur: 10
+
+# 5. ALLGEMEINE EINSTELLUNGEN
+settings:
+  currency: "eur"
+  # Pause in Sekunden zwischen zwei API-Anfragen, um die Schnittstelle zu schonen
+  request_delay_seconds: 0.2
+  # Nach wie vielen fehlgeschlagenen Läufen in Folge soll eine Telegram-Warnung gesendet werden?
+  max_consecutive_errors_before_alert: 3
