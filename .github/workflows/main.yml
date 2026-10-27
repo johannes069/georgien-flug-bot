@@ -1,0 +1,63 @@
+name: "Flugpreis-Bot (Georgien)"
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Nur Testnachricht an Telegram senden (prüft, ob alles funktioniert)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  track-flights:
+    name: "Flugpreise prüfen"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Repository auschecken"
+        uses: actions/checkout@v4
+
+      - name: "Python 3.11 einrichten"
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: "Abhängigkeiten installieren"
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: "Flugsuche starten"
+        env:
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
+            echo "🚀 Führe Testmodus aus..."
+            python tracker.py --test
+          else
+            echo "🔍 Führe reguläre Flugsuche aus..."
+            python tracker.py
+          fi
+
+      - name: "Preisdaten und Historie sichern"
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if [ -n "$(git status --porcelain data/)" ]; then
+            echo "💾 Neue Preisdaten oder gemeldete Deals gefunden. Sichere Daten im Repository..."
+            git add data/
+            git commit -m "Auto: Preisdaten und Historie aktualisiert [skip ci]"
+            git push
+          else
+            echo "ℹ️ Keine Änderungen an den Daten. Kein Commit erforderlich."
+          fi
