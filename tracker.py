@@ -15,6 +15,7 @@ import time
 import argparse
 import statistics
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -202,6 +203,35 @@ def fetch_prices_for_route(
         return []
 
 
+def build_daily_summary(best_offer_per_route: Dict[str, dict], max_price: int, now_berlin: datetime) -> str:
+    """Baut die tägliche Lebenszeichen-Nachricht mit den aktuell günstigsten Strecken."""
+    header = (
+        f"☀️ <b>Tagesbericht Flugpreis-Bot</b> ({now_berlin.strftime('%d.%m.%Y')})\n"
+        "Der Bot läuft. Hier die günstigsten Preise, die er gerade kennt "
+        f"(Feb/Mär 2027, 7–14 Tage, Hin & Zurück, dein Limit: {max_price} €):"
+    )
+    if not best_offer_per_route:
+        return header + "\n\nℹ️ Heute hat die Flug-API für keine Strecke passende Angebote geliefert."
+
+    top = sorted(best_offer_per_route.values(), key=lambda o: o["price"])[:5]
+    lines = []
+    for i, o in enumerate(top):
+        medal = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i]
+        link = create_google_flights_link(o["origin"], o["destination"], o["dep_date"], o["ret_date"])
+        lines.append(
+            f"{medal} <b>{o['price']} €</b> · {o['origin_name']} ➔ {o['destination_name']}\n"
+            f"     {format_date_german(o['dep_date'])} – {format_date_german(o['ret_date'])} "
+            f"({o['stay_days']} Tage), {get_airline_name(o['airline_code'])} · "
+            f"<a href=\"{link}\">ansehen</a>"
+        )
+    gap = top[0]["price"] - max_price
+    footer = (
+        f"\n\n📊 Bestpreis liegt noch <b>{gap} €</b> über deinem Limit."
+        if gap > 0 else "\n\n🎉 Bestpreis liegt unter deinem Limit!"
+    )
+    return header + "\n\n" + "\n".join(lines) + footer
+
+
 def run_test_mode(telegram_token: str, telegram_chat_id: str) -> None:
     """Sendet eine Beispiel-Testnachricht, um zu prüfen, ob Telegram funktioniert."""
     print("🚀 Testmodus aktiv: Sende Beispiel-Deal an Telegram...")
@@ -278,11 +308,29 @@ def main():
     delay = config.get("settings", {}).get("request_delay_seconds", 0.2)
     max_errors_alert = config.get("settings", {}).get("max_consecutive_errors_before_alert", 3)
 
+    summary_cfg = config.get("daily_summary", {}) or {}
+    summary_enabled = summary_cfg.get("enabled", True)
+    summary_hour = summary_cfg.get("hour", 9)
+
+    # Heutiges Datum in deutscher Zeit (für Tages-Historie und Tagesbericht)
+    now_berlin = datetime.now(ZoneInfo("Europe/Berlin"))
+    today = now_berlin.strftime("%Y-%m-%d")
+
+    # Preis-Historie: pro Strecke EIN Bestpreis pro Tag, z. B. {"DTM_KUT": {"2026-10-28": 231}}
+    # Altes Format (lange Liste mit immer denselben Preisen) wird verworfen, weil es
+    # den "üblichen Preis" verfälscht hat.
+    for rk in list(price_history.keys()):
+        if not isinstance(price_history[rk], dict):
+            print(f"♻️ Alte Preis-Historie für {rk} wird auf das neue Tagesformat umgestellt.")
+            price_history[rk] = {}
+
     print(f"🔍 Starte Flugsuche: {len(origins)} Abflughäfen x {len(destinations)} Ziele x {len(months)} Monate")
-    
+
     collected_deals: List[dict] = []
     total_queries = 0
     failed_queries = 0
+    # Günstigstes passendes Angebot je Strecke in diesem Lauf (für Historie + Tagesbericht)
+    best_offer_per_route: Dict[str, dict] = {}
 
     # 4. Suche über alle Strecken und Monate ausführen
     for origin_info in origins:
@@ -293,6 +341,10 @@ def main():
             dest = dest_info["code"]
             dest_name = dest_info.get("name", dest)
             route_key = f"{orig}_{dest}"
+
+            # "Üblicher Preis" = Median der Tages-Bestpreise der VORHERIGEN Tage
+            past_days = {d: p for d, p in price_history.get(route_key, {}).items() if d != today}
+            median_price = statistics.median(past_days.values()) if past_days else None
 
             for month in months:
                 total_queries += 1
@@ -318,21 +370,21 @@ def main():
                     if stay_days is None or stay_days < min_stay or stay_days > max_stay:
                         continue
 
-                    # Preis in die Historie dieser Route eintragen
-                    if route_key not in price_history:
-                        price_history[route_key] = []
-                    price_history[route_key].append(price)
+                    # Günstigstes Angebot dieser Strecke im aktuellen Lauf merken
+                    if route_key not in best_offer_per_route or price < best_offer_per_route[route_key]["price"]:
+                        best_offer_per_route[route_key] = {
+                            "origin": orig, "origin_name": orig_name,
+                            "destination": dest, "destination_name": dest_name,
+                            "dep_date": dep_at.split("T")[0], "ret_date": ret_at.split("T")[0],
+                            "stay_days": stay_days, "price": price, "airline_code": airline_code,
+                        }
 
-                    # Median / Durchschnitt berechnen
-                    history_samples = price_history[route_key]
-                    median_price = statistics.median(history_samples)
-                    
                     # 5. Deal-Kriterien prüfen
                     is_absolute_deal = price <= max_price
                     is_relative_deal = False
                     savings_info = ""
 
-                    if len(history_samples) >= min_history:
+                    if median_price is not None and len(past_days) >= min_history:
                         discount_threshold = median_price * (1 - (rel_discount / 100.0))
                         if price <= discount_threshold:
                             is_relative_deal = True
@@ -394,10 +446,17 @@ def main():
                         "last_notified": datetime.utcnow().isoformat(),
                     }
 
-    # Historien-Listen auf maximal 100 Einträge pro Route deckeln, um JSON klein zu halten
+    # Tages-Bestpreis je Strecke in die Historie schreiben (niedrigster Preis des Tages zählt)
+    for rk, offer in best_offer_per_route.items():
+        day_prices = price_history.setdefault(rk, {})
+        if today not in day_prices or offer["price"] < day_prices[today]:
+            day_prices[today] = offer["price"]
+
+    # Nur die letzten 60 Tage behalten, damit die Datei klein bleibt
     for rk in price_history:
-        if len(price_history[rk]) > 100:
-            price_history[rk] = price_history[rk][-100:]
+        if len(price_history[rk]) > 60:
+            newest = sorted(price_history[rk].keys())[-60:]
+            price_history[rk] = {d: price_history[rk][d] for d in newest}
 
     # 7. Fehlerbehandlung für wiederholte API-Ausfälle
     if total_queries > 0 and failed_queries == total_queries:
@@ -420,14 +479,37 @@ def main():
         status_data["consecutive_errors"] = 0
         status_data["last_successful_run"] = datetime.utcnow().isoformat()
 
+    telegram_failed = False
+
+    # 8. Tagesbericht: einmal am Tag ab der eingestellten Uhrzeit ein Lebenszeichen schicken
+    if (
+        summary_enabled
+        and now_berlin.hour >= summary_hour
+        and status_data.get("last_daily_summary") != today
+        and failed_queries < total_queries
+    ):
+        summary_msg = build_daily_summary(best_offer_per_route, max_price, now_berlin)
+        if args.dry_run:
+            print("\n--- DRY RUN (Tagesbericht) ---")
+            print(summary_msg)
+            print("------------------------------")
+        elif send_telegram_message(telegram_token, telegram_chat_id, summary_msg):
+            print("✅ Tagesbericht gesendet.")
+            status_data["last_daily_summary"] = today
+        else:
+            print("❌ Tagesbericht konnte nicht gesendet werden.")
+            telegram_failed = True
+
     # Status und Historie persistent speichern
     if not args.dry_run:
         save_json_file(STATUS_PATH, status_data)
         save_json_file(PRICE_HISTORY_PATH, price_history)
 
-    # 8. Telegram-Nachricht mit allen Deals des Laufs bündeln
+    # 9. Telegram-Nachricht mit allen Deals des Laufs bündeln
     if not collected_deals:
-        print("ℹ️ Keine neuen Schnäppchen in diesem Durchlauf gefunden. Sende keine Nachricht.")
+        print("ℹ️ Keine neuen Schnäppchen in diesem Durchlauf gefunden. Sende keine Deal-Nachricht.")
+        if telegram_failed:
+            sys.exit(1)  # Lauf in GitHub rot markieren, damit Telegram-Probleme auffallen
         return
 
     print(f"🎉 {len(collected_deals)} Schnäppchen gefunden! Bereite Telegram-Nachricht vor...")
@@ -465,6 +547,10 @@ def main():
             save_json_file(NOTIFIED_DEALS_PATH, notified_deals)
         else:
             print("❌ Fehler beim Senden der Telegram-Nachricht.")
+            telegram_failed = True
+
+    if telegram_failed:
+        sys.exit(1)  # Lauf in GitHub rot markieren, damit Telegram-Probleme auffallen
 
 
 if __name__ == "__main__":

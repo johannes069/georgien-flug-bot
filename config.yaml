@@ -66,7 +66,7 @@ deals:
   # Durchschnitt bzw. Median dieser Route liegen? (z. B. 30 für 30 % Rabatt)
   relative_discount_percent: 30
 
-  # Mindestanzahl an gespeicherten Preisen, bevor der relative Rabatt aktiv wird
+  # Wie viele Tage Preisverlauf mindestens gesammelt sein müssen, bevor der relative Rabatt aktiv wird
   min_history_samples: 3
 
   # Um wie viel Euro muss der Preis mindestens sinken, damit ein BEREITS gemeldeter
@@ -80,3 +80,10 @@ settings:
   request_delay_seconds: 0.2
   # Nach wie vielen fehlgeschlagenen Läufen in Folge soll eine Telegram-Warnung gesendet werden?
   max_consecutive_errors_before_alert: 3
+
+# 6. TAGESBERICHT (Lebenszeichen)
+# Einmal pro Tag schickt der Bot eine kurze Übersicht mit den günstigsten Preisen,
+# auch wenn kein Deal dabei ist. So siehst du, dass er läuft.
+daily_summary:
+  enabled: true   # auf false setzen, um den Tagesbericht abzuschalten
+  hour: 9         # ab dieser Uhrzeit (deutsche Zeit) wird der Bericht verschickt
