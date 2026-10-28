@@ -36,6 +36,36 @@ origins:
   - code: "NRN"
     name: "Weeze (Niederrhein)"
     prio: 3
+  - code: "KSF"
+    name: "Kassel"
+    prio: 2
+  - code: "BRE"
+    name: "Bremen"
+    prio: 3
+  - code: "HHN"
+    name: "Frankfurt-Hahn"
+    prio: 3
+
+  # Priorität 4: Erweiterter Radius inkl. Niederlande & Belgien (ca. 2,5 - 4 Std.)
+  # Lohnt sich vor allem, wenn dort ein richtig billiger Flug auftaucht.
+  - code: "EIN"
+    name: "Eindhoven (NL)"
+    prio: 4
+  - code: "MST"
+    name: "Maastricht (NL)"
+    prio: 4
+  - code: "AMS"
+    name: "Amsterdam (NL)"
+    prio: 4
+  - code: "BRU"
+    name: "Brüssel (BE)"
+    prio: 4
+  - code: "CRL"
+    name: "Brüssel-Charleroi (BE)"
+    prio: 4
+  - code: "HAM"
+    name: "Hamburg"
+    prio: 4
 
 # 2. ZIELFLUGHÄFEN (Georgien)
 destinations:
