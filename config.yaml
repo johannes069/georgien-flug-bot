@@ -117,3 +117,34 @@ settings:
 daily_summary:
   enabled: true   # auf false setzen, um den Tagesbericht abzuschalten
   hour: 9         # ab dieser Uhrzeit (deutsche Zeit) wird der Bericht verschickt
+
+# 7. ZUSATZSUCHEN (eigene Suchen neben Georgien)
+# Jede Zusatzsuche hat ihre eigenen Flughäfen, Tage und Preisgrenzen.
+# Ist der letzte Abflugtag vorbei, schaltet sich die Suche von selbst ab.
+extra_searches:
+  - name: "Silvester in Warschau"
+    flag: "🇵🇱"
+    label: "Abflug 30./31.12.2026, ca. 4–5 Tage"
+    enabled: true
+    origins:
+      - code: "DTM"
+        name: "Dortmund"
+      - code: "DUS"
+        name: "Düsseldorf"
+      - code: "NRN"
+        name: "Weeze"
+      - code: "CGN"
+        name: "Köln/Bonn"
+    destinations:
+      - code: "WAW"
+        name: "Warschau-Chopin"   # Hauptflughafen
+      - code: "WMI"
+        name: "Warschau-Modlin"   # Ryanair-Flughafen, ca. 40 Min. außerhalb
+    departure_dates:
+      - "2026-12-30"
+      - "2026-12-31"
+    stay_duration:
+      min_days: 3   # "ungefähr 4–5 Tage" -> etwas Spielraum nach unten und oben
+      max_days: 6
+    max_price_eur: 100   # teurer wird nicht gemeldet (Hin & Zurück, pro Person)
+    top_price_eur: 50    # darunter gibt es die Markierung "Top-Deal"

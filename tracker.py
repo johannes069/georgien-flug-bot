@@ -203,15 +203,149 @@ def fetch_prices_for_route(
         return []
 
 
+def run_extra_search(
+    search: dict,
+    api_token: str,
+    currency: str,
+    delay: float,
+    notified_deals: dict,
+    price_drop_threshold: int,
+    today: str,
+) -> Tuple[List[dict], Dict[str, dict], int, int]:
+    """
+    Führt eine Zusatzsuche aus config.yaml (Abschnitt extra_searches) aus,
+    z. B. "Silvester in Warschau" mit festen Abflugtagen.
+    Gibt zurück: (gefundene Deals, günstigstes Angebot je Strecke, Anzahl Abfragen, Anzahl Fehler)
+    """
+    name = search.get("name", "Zusatzsuche")
+    dep_dates = [str(d) for d in search.get("departure_dates", [])]
+    min_stay = search.get("stay_duration", {}).get("min_days", 1)
+    max_stay = search.get("stay_duration", {}).get("max_days", 30)
+    max_price = search.get("max_price_eur", 100)
+    top_price = search.get("top_price_eur", 0)
+
+    # Wenn alle Abflugtage vorbei sind, wird die Suche automatisch übersprungen
+    upcoming_dates = [d for d in dep_dates if d >= today]
+    if not search.get("enabled", True) or not upcoming_dates:
+        print(f"⏭️ Zusatzsuche '{name}' übersprungen (abgeschaltet oder Abflugtage vorbei).")
+        return [], {}, 0, 0
+
+    print(f"🔍 Zusatzsuche '{name}': {len(search.get('origins', []))} Abflughäfen x "
+          f"{len(search.get('destinations', []))} Ziele x {len(upcoming_dates)} Abflugtage")
+
+    deals: List[dict] = []
+    best_offers: Dict[str, dict] = {}
+    total = failed = 0
+
+    for origin_info in search.get("origins", []):
+        orig = origin_info["code"]
+        orig_name = origin_info.get("name", orig)
+        for dest_info in search.get("destinations", []):
+            dest = dest_info["code"]
+            dest_name = dest_info.get("name", dest)
+            route_key = f"{orig}_{dest}"
+
+            for dep_date in upcoming_dates:
+                total += 1
+                try:
+                    time.sleep(delay)
+                    raw_offers = fetch_prices_for_route(api_token, orig, dest, dep_date, currency=currency)
+                except Exception as e:
+                    print(f"❌ Fehler bei Anfrage für {orig} -> {dest} ({dep_date}): {e}")
+                    failed += 1
+                    continue
+
+                for offer in raw_offers:
+                    price = offer.get("price")
+                    dep_at = offer.get("departure_at")
+                    ret_at = offer.get("return_at")
+                    airline_code = offer.get("airline", "Unbekannt")
+                    if not price or not dep_at or not ret_at:
+                        continue
+
+                    dep_clean = dep_at.split("T")[0]
+                    ret_clean = ret_at.split("T")[0]
+                    if dep_clean not in upcoming_dates:
+                        continue  # nur die gewünschten Abflugtage
+                    stay_days = calculate_stay_days(dep_at, ret_at)
+                    if stay_days is None or stay_days < min_stay or stay_days > max_stay:
+                        continue
+
+                    if route_key not in best_offers or price < best_offers[route_key]["price"]:
+                        best_offers[route_key] = {
+                            "origin": orig, "origin_name": orig_name,
+                            "destination": dest, "destination_name": dest_name,
+                            "dep_date": dep_clean, "ret_date": ret_clean,
+                            "stay_days": stay_days, "price": price, "airline_code": airline_code,
+                        }
+
+                    if price > max_price:
+                        continue
+
+                    if top_price and price <= top_price:
+                        reason = f"🔥 Top-Deal: unter {top_price} €!"
+                    else:
+                        reason = f"🎯 Deal: liegt unter deinem Limit von {max_price} €"
+
+                    deal_key = f"{orig}_{dest}_{dep_clean}_{ret_clean}_{airline_code}"
+                    if deal_key in notified_deals:
+                        prev_price = notified_deals[deal_key].get("last_price", 999999)
+                        if price <= prev_price - price_drop_threshold:
+                            reason = f"💥 <b>PREIS GEFALLEN!</b> Von {prev_price} € auf nur noch <b>{price} €</b> gesunken!"
+                        else:
+                            continue
+
+                    deals.append({
+                        "search_name": name,
+                        "deal_key": deal_key,
+                        "origin": orig, "origin_name": orig_name,
+                        "destination": dest, "destination_name": dest_name,
+                        "dep_date": dep_clean, "ret_date": ret_clean,
+                        "stay_days": stay_days, "price": price,
+                        "airline_code": airline_code,
+                        "airline_name": get_airline_name(airline_code),
+                        "reason": reason,
+                        "booking_link": create_google_flights_link(orig, dest, dep_clean, ret_clean),
+                    })
+                    notified_deals[deal_key] = {
+                        "last_price": price,
+                        "last_notified": datetime.utcnow().isoformat(),
+                    }
+
+    return deals, best_offers, total, failed
+
+
+def build_extra_summary_section(search: dict, best_offers: Dict[str, dict]) -> str:
+    """Kurzer Abschnitt im Tagesbericht für eine Zusatzsuche (Top 3)."""
+    name = search.get("name", "Zusatzsuche")
+    flag = search.get("flag", "✈️")
+    max_price = search.get("max_price_eur", 100)
+    head = f"\n\n{flag} <b>{name}</b> ({search.get('label', '')}, Limit: {max_price} €):"
+    if not best_offers:
+        return head + "\nℹ️ Heute keine passenden Angebote von der Flug-API."
+    top = sorted(best_offers.values(), key=lambda o: o["price"])[:3]
+    lines = []
+    for i, o in enumerate(top):
+        medal = ["🥇", "🥈", "🥉"][i]
+        link = create_google_flights_link(o["origin"], o["destination"], o["dep_date"], o["ret_date"])
+        lines.append(
+            f"{medal} <b>{o['price']} €</b> · {o['origin_name']} ➔ {o['destination_name']}\n"
+            f"     {format_date_german(o['dep_date'])} – {format_date_german(o['ret_date'])} "
+            f"({o['stay_days']} Tage), {get_airline_name(o['airline_code'])} · "
+            f"<a href=\"{link}\">ansehen</a>"
+        )
+    return head + "\n" + "\n".join(lines)
+
+
 def build_daily_summary(best_offer_per_route: Dict[str, dict], max_price: int, now_berlin: datetime) -> str:
     """Baut die tägliche Lebenszeichen-Nachricht mit den aktuell günstigsten Strecken."""
     header = (
         f"☀️ <b>Tagesbericht Flugpreis-Bot</b> ({now_berlin.strftime('%d.%m.%Y')})\n"
-        "Der Bot läuft. Hier die günstigsten Preise, die er gerade kennt "
-        f"(Feb/Mär 2027, 7–14 Tage, Hin & Zurück, dein Limit: {max_price} €):"
+        "Der Bot läuft. Hier die günstigsten Preise, die er gerade kennt (Hin & Zurück).\n\n"
+        f"🇬🇪 <b>Georgien</b> (Feb/Mär 2027, 7–14 Tage, Limit: {max_price} €):"
     )
     if not best_offer_per_route:
-        return header + "\n\nℹ️ Heute hat die Flug-API für keine Strecke passende Angebote geliefert."
+        return header + "\nℹ️ Heute hat die Flug-API für keine Strecke passende Angebote geliefert."
 
     top = sorted(best_offer_per_route.values(), key=lambda o: o["price"])[:5]
     lines = []
@@ -229,7 +363,7 @@ def build_daily_summary(best_offer_per_route: Dict[str, dict], max_price: int, n
         f"\n\n📊 Bestpreis liegt noch <b>{gap} €</b> über deinem Limit."
         if gap > 0 else "\n\n🎉 Bestpreis liegt unter deinem Limit!"
     )
-    return header + "\n\n" + "\n".join(lines) + footer
+    return header + "\n" + "\n".join(lines) + footer
 
 
 def run_test_mode(telegram_token: str, telegram_chat_id: str) -> None:
@@ -424,6 +558,7 @@ def main():
                     booking_link = create_google_flights_link(orig, dest, dep_date_clean, ret_date_clean)
                     
                     deal_item = {
+                        "search_name": "Georgien",
                         "deal_key": deal_key,
                         "origin": orig,
                         "origin_name": orig_name,
@@ -445,6 +580,18 @@ def main():
                         "last_price": price,
                         "last_notified": datetime.utcnow().isoformat(),
                     }
+
+    # 4b. Zusatzsuchen (z. B. Silvester in Warschau) ausführen
+    extra_searches = config.get("extra_searches", []) or []
+    extra_best_offers: Dict[str, Dict[str, dict]] = {}
+    for search in extra_searches:
+        x_deals, x_best, x_total, x_failed = run_extra_search(
+            search, api_token, currency, delay, notified_deals, price_drop_threshold, today
+        )
+        collected_deals.extend(x_deals)
+        extra_best_offers[search.get("name", "Zusatzsuche")] = x_best
+        total_queries += x_total
+        failed_queries += x_failed
 
     # Tages-Bestpreis je Strecke in die Historie schreiben (niedrigster Preis des Tages zählt)
     for rk, offer in best_offer_per_route.items():
@@ -489,6 +636,9 @@ def main():
         and failed_queries < total_queries
     ):
         summary_msg = build_daily_summary(best_offer_per_route, max_price, now_berlin)
+        for search in extra_searches:
+            if search.get("enabled", True) and any(str(d) >= today for d in search.get("departure_dates", [])):
+                summary_msg += build_extra_summary_section(search, extra_best_offers.get(search.get("name", "Zusatzsuche"), {}))
         if args.dry_run:
             print("\n--- DRY RUN (Tagesbericht) ---")
             print(summary_msg)
@@ -517,12 +667,18 @@ def main():
     # Sortiere Deals nach Preis aufsteigend
     collected_deals.sort(key=lambda d: d["price"])
 
-    message_blocks = [
-        f"🚨 <b>{len(collected_deals)} NEUE(R) FLUG-DEAL(S) GEFUNDEN!</b> 🇬🇪\n"
-        f"Reisezeitraum: Feb / Mär 2027 (7–14 Tage)"
-    ]
+    message_blocks = [f"🚨 <b>{len(collected_deals)} NEUE(R) FLUG-DEAL(S) GEFUNDEN!</b>"]
 
-    for d in collected_deals:
+    group_titles = {"Georgien": "🇬🇪 <b>Georgien</b> · Feb / Mär 2027 (7–14 Tage)"}
+    for search in extra_searches:
+        n = search.get("name", "Zusatzsuche")
+        group_titles[n] = f"{search.get('flag', '✈️')} <b>{n}</b> · {search.get('label', '')}"
+
+    current_group = None
+    for d in sorted(collected_deals, key=lambda d: (d.get("search_name") != "Georgien", d.get("search_name"), d["price"])):
+        if d.get("search_name") != current_group:
+            current_group = d.get("search_name")
+            message_blocks.append(group_titles.get(current_group, current_group))
         block = (
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"✈️ <b>{d['origin_name']} ({d['origin']}) ➔ {d['destination_name']} ({d['destination']})</b>\n"
