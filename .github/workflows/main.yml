@@ -10,6 +10,11 @@ on:
         required: true
         type: boolean
         default: false
+      bericht:
+        description: 'Tagesbericht sofort an Telegram senden'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,6 +48,9 @@ jobs:
           if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
             echo "🚀 Führe Testmodus aus..."
             python tracker.py --test
+          elif [ "${{ github.event.inputs.bericht }}" = "true" ]; then
+            echo "📨 Suche läuft und Tagesbericht wird sofort gesendet..."
+            python tracker.py --report
           else
             echo "🔍 Führe reguläre Flugsuche aus..."
             python tracker.py

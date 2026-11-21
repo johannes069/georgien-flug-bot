@@ -396,6 +396,7 @@ def run_test_mode(telegram_token: str, telegram_chat_id: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Flugpreis-Bot für Georgien-Reisen")
     parser.add_argument("--test", action="store_true", help="Sendet nur eine Telegram-Testnachricht")
+    parser.add_argument("--report", action="store_true", help="Schickt den Tagesbericht sofort (auch wenn heute schon einer kam)")
     parser.add_argument("--dry-run", action="store_true", help="Führt die Suche aus, sendet aber keine Telegram-Nachrichten")
     args = parser.parse_args()
 
@@ -630,10 +631,13 @@ def main():
 
     # 8. Tagesbericht: einmal am Tag ab der eingestellten Uhrzeit ein Lebenszeichen schicken
     if (
-        summary_enabled
-        and now_berlin.hour >= summary_hour
-        and status_data.get("last_daily_summary") != today
-        and failed_queries < total_queries
+        args.report
+        or (
+            summary_enabled
+            and now_berlin.hour >= summary_hour
+            and status_data.get("last_daily_summary") != today
+            and failed_queries < total_queries
+        )
     ):
         summary_msg = build_daily_summary(best_offer_per_route, max_price, now_berlin)
         for search in extra_searches:
