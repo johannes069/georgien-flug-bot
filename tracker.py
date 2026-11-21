@@ -255,6 +255,13 @@ def run_extra_search(
                     failed += 1
                     continue
 
+                # Protokoll: was liefert die API überhaupt? (hilft bei der Fehlersuche)
+                summary = ", ".join(
+                    f"{x.get('price')}€ {str(x.get('departure_at',''))[:10]}→{str(x.get('return_at',''))[:10]} {x.get('airline','?')}"
+                    for x in sorted(raw_offers, key=lambda x: x.get("price") or 0)[:6]
+                )
+                print(f"   📋 {orig}->{dest} ab {dep_date}: {len(raw_offers)} Angebote von der API" + (f" | {summary}" if summary else ""))
+
                 for offer in raw_offers:
                     price = offer.get("price")
                     dep_at = offer.get("departure_at")
